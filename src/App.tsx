@@ -49,6 +49,7 @@ import {
   blobToBase64,
   GEMINI_API_KEY,
   GEMINI_MODEL,
+  GeminiError,
   SYSTEM_PROMPT,
   pickMimeType,
 } from "./lib/gemini";
@@ -234,6 +235,8 @@ export default function App() {
   const [status, setStatus] = useState("En espera — presiona Grabar para comenzar");
   const [response, setResponse] = useState("");
   const [error, setError] = useState("");
+  /** Detalle técnico del último error (para el <details> colapsable). */
+  const [errorDetail, setErrorDetail] = useState("");
   const [elapsed, setElapsed] = useState(0);
   const [clipBytes, setClipBytes] = useState(0);
   const [muted, setMutedUi] = useState(() => store.get("gem-muted") === "1");
@@ -636,6 +639,7 @@ export default function App() {
     elapsedRef.current = 0;
     setElapsed(0);
     setError("");
+    setErrorDetail("");
 
     goPhase("starting");
     setStatus("Solicitando micrófono…");
@@ -735,12 +739,15 @@ export default function App() {
       if (name === "NotAllowedError" || name === "SecurityError") {
         setStatus("En espera");
         setError("Permiso de micrófono denegado. Actívalo en la barra del navegador y vuelve a intentarlo.");
+        setErrorDetail("");
       } else if (name === "NotFoundError") {
         setStatus("En espera");
         setError("No se detectó ningún micrófono en este equipo.");
+        setErrorDetail("");
       } else {
         setStatus("En espera");
         setError((err as Error)?.message || "No se pudo iniciar la grabación.");
+        setErrorDetail("");
       }
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -823,6 +830,7 @@ export default function App() {
       responseRef.current = text;
       setResponse(text);
       setError("");
+      setErrorDetail("");
       setHistory((h) =>
         [
           {
@@ -842,7 +850,13 @@ export default function App() {
       sfx.error();
       goPhase("idle");
       setStatus("En espera");
-      setError((err as Error)?.message || "Ocurrió un error inesperado al procesar el audio.");
+      if (err instanceof GeminiError) {
+        setError(err.message);
+        setErrorDetail(err.detail || "");
+      } else {
+        setError((err as Error)?.message || "Ocurrió un error inesperado al procesar el audio.");
+        setErrorDetail("");
+      }
     }
   }, [goPhase, pauseChrono, teardownMic, speak]);
 
@@ -1087,7 +1101,19 @@ export default function App() {
             {error && (
               <div className="answer-in mb-3 flex items-start gap-2.5 rounded-lg border border-[#ff6b5e]/40 bg-[#ff6b5e]/10 px-3.5 py-3 text-sm text-[#ffb4ad]">
                 <AlertIcon size={18} className="mt-0.5 shrink-0" />
-                <p>{error}</p>
+                <div className="min-w-0 flex-1">
+                  <p>{error}</p>
+                  {errorDetail && (
+                    <details className="mt-2">
+                      <summary className="cursor-pointer select-none font-mono-gem text-[10px] uppercase tracking-widest text-[#ffb4ad]/70 transition-colors hover:text-[#ffb4ad]">
+                        Detalle técnico
+                      </summary>
+                      <p className="mt-1.5 break-words font-mono-gem text-[11px] leading-relaxed text-[#ffb4ad]/80">
+                        {errorDetail}
+                      </p>
+                    </details>
+                  )}
+                </div>
               </div>
             )}
 

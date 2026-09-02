@@ -327,9 +327,65 @@ export function blobToBase64(blob: Blob): Promise<string> {
   });
 }
 
-/** Extrae un mensaje legible de un error arbitrario (incluido el del SDK). */
-function describeError(err: unknown): string {
-  if (typeof err === "string") return err;
+/**
+ * Error de Gemini con un campo `detail` para que la UI pueda mostrar
+ * el mensaje amigable por un lado y el detalle técnico en un
+ * <details> colapsable. Sin esto, terminábamos mostrando JSON crudo
+ * de Google en la pantalla del usuario.
+ */
+export class GeminiError extends Error {
+  readonly detail?: string;
+  readonly code?: number | string;
+  readonly status?: string;
+  constructor(message: string, opts: { detail?: string; code?: number | string; status?: string } = {}) {
+    super(message);
+    this.name = "GeminiError";
+    this.detail = opts.detail;
+    this.code = opts.code;
+    this.status = opts.status;
+  }
+}
+
+/**
+ * Intenta parsear un string como JSON de error de Google y devolver
+ * el `message` y metadatos que contiene. Devuelve `null` si el
+ * string no es JSON parseable con forma de error de Google.
+ */
+function parseGoogleErrorJson(raw: string): { message: string; code?: number; status?: string } | null {
+  const trimmed = raw.trim();
+  if (!trimmed.startsWith("{") || !trimmed.includes("\"error\"")) return null;
+  try {
+    const parsed = JSON.parse(trimmed) as {
+      error?: { message?: string; code?: number; status?: string };
+    };
+    const msg = parsed?.error?.message;
+    if (typeof msg !== "string" || !msg) return null;
+    return { message: msg, code: parsed.error?.code, status: parsed.error?.status };
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Extrae un mensaje legible y, por separado, un detalle técnico
+ * de un error arbitrario (incluido el del SDK). El detalle puede
+ * incluir el `message` original de Google, el código HTTP, etc.,
+ * y la UI decide si lo muestra o no.
+ */
+function describeError(err: unknown): { message: string; detail: string; code?: number | string; status?: string } {
+  const fallback = { message: "Error desconocido al hablar con Gemini.", detail: "" };
+  if (typeof err === "string") {
+    const parsed = parseGoogleErrorJson(err);
+    if (parsed) {
+      return {
+        message: parsed.message,
+        detail: parsed.code ? `[${parsed.code}] ${parsed.message}` : parsed.message,
+        code: parsed.code,
+        status: parsed.status,
+      };
+    }
+    return { message: err, detail: err };
+  }
   if (err && typeof err === "object") {
     const e = err as {
       message?: string;
@@ -337,28 +393,52 @@ function describeError(err: unknown): string {
       code?: number | string;
       error?: { message?: string; code?: number | string; status?: string };
     };
-    if (e.error?.message) {
-      const code = e.error.code ?? e.error.status ?? e.status ?? e.code;
-      return code ? `[${code}] ${e.error.message}` : e.error.message;
+
+    // 1) El SDK a veces mete el JSON de Google como string en `message`.
+    if (typeof e.message === "string") {
+      const parsed = parseGoogleErrorJson(e.message);
+      if (parsed) {
+        return {
+          message: parsed.message,
+          detail: parsed.code ? `[${parsed.code}] ${parsed.message}` : parsed.message,
+          code: parsed.code,
+          status: parsed.status,
+        };
+      }
     }
-    if (e.message) return e.message;
+
+    // 2) Forma estructurada: { error: { message, code, status } }
+    if (e.error?.message) {
+      const code = e.error.code ?? e.status ?? e.code;
+      const status = e.error.status;
+      const detailMsg = code ? `[${code}] ${e.error.message}` : e.error.message;
+      return { message: e.error.message, detail: detailMsg, code, status };
+    }
+
+    // 3) Fallback: el `message` plano.
+    if (e.message) {
+      return { message: e.message, detail: e.message };
+    }
+    return fallback;
   }
-  return "Error desconocido al hablar con Gemini.";
+  return fallback;
 }
 
 /**
  * Detecta errores transitorios del servicio (503 UNAVAILABLE,
  * "high demand", "overloaded", etc.). En esos casos, reintentamos
- * una vez antes de mostrar el error al usuario.
+ * con backoff antes de mostrar el error al usuario.
  */
 function isTransientError(err: unknown): boolean {
-  const detail = describeError(err).toLowerCase();
+  const { message, status, code } = describeError(err);
+  const lower = `${message} ${status ?? ""} ${code ?? ""}`.toLowerCase();
   return (
-    detail.includes("503") ||
-    detail.includes("unavailable") ||
-    detail.includes("high demand") ||
-    detail.includes("overloaded") ||
-    detail.includes("try again later")
+    lower.includes("503") ||
+    lower.includes("unavailable") ||
+    lower.includes("high demand") ||
+    lower.includes("overloaded") ||
+    lower.includes("try again later") ||
+    lower.includes("resource_exhausted")
   );
 }
 
@@ -420,7 +500,9 @@ export async function askGemini(base64Audio: string, mimeType: string, apiKey: s
     temperature: 0.3,
   };
 
-  const MAX_ATTEMPTS = 2;
+  const MAX_ATTEMPTS = 3;
+  // Backoff en ms: 1er reintento a los 4 s, 2do a los 8 s.
+  const BACKOFF_MS = [4000, 8000];
   let lastErr: unknown = null;
   for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
     try {
@@ -437,19 +519,25 @@ export async function askGemini(base64Audio: string, mimeType: string, apiKey: s
     } catch (err) {
       lastErr = err;
       if (attempt < MAX_ATTEMPTS && isTransientError(err)) {
-        // Espera 4 s antes del reintento. Mientras tanto la UI muestra
-        // "Procesando con Gemini…" (estado processing).
-        await new Promise((resolve) => setTimeout(resolve, 4000));
+        // Backoff antes del reintento. Mientras tanto la UI muestra
+        // "Procesando con Gemini…" (estado processing) — el usuario
+        // puede pensar que la app colgó, pero es el comportamiento
+        // esperado: reintento silencioso con espera.
+        const wait = BACKOFF_MS[attempt - 1] ?? 4000;
+        await new Promise((resolve) => setTimeout(resolve, wait));
         continue;
       }
       break;
     }
   }
 
-  // Si llegamos acá, falló definitivamente. Mapeo a un mensaje en
-  // español claro, sin JSON crudo en la UI.
-  const detail = describeError(lastErr);
-  const lower = detail.toLowerCase();
+  // Si llegamos acá, falló definitivamente. Mapeo a un mensaje
+  // amigable en español, sin JSON crudo en la UI. El detalle técnico
+  // va aparte (GeminiError.detail) y la UI lo muestra en un <details>
+  // colapsable.
+  const { message, detail, code, status } = describeError(lastErr);
+  const lower = `${message} ${detail}`.toLowerCase();
+
   if (
     lower.includes("api key") ||
     lower.includes("auth") ||
@@ -458,19 +546,27 @@ export async function askGemini(base64Audio: string, mimeType: string, apiKey: s
     lower.includes("401") ||
     lower.includes("403")
   ) {
-    throw new Error(`API Key rechazada por Gemini: ${detail}`);
+    throw new GeminiError("Gemini rechazó tu API Key. Verificá que esté bien copiada y que la key tenga acceso a este modelo.", {
+      detail,
+      code,
+      status,
+    });
   }
-  if (lower.includes("quota") || lower.includes("429") || lower.includes("rate")) {
-    throw new Error(`Cuota o rate-limit de Gemini: ${detail}`);
+  if (lower.includes("quota") || lower.includes("429") || lower.includes("rate") || lower.includes("resource_exhausted")) {
+    throw new GeminiError("Llegaste al límite de uso de Gemini (cuota o rate-limit). Esperá unos minutos o revisá tu plan en Google AI Studio.", {
+      detail,
+      code,
+      status,
+    });
   }
   if (isTransientError(lastErr)) {
-    throw new Error(
-      "El servicio de Gemini está saturado. Reintentá en unos minutos. " +
-        `Detalle: ${detail}`
+    throw new GeminiError(
+      "El servicio de Gemini está saturado ahora mismo. Esperá uno o dos minutos y volvé a intentar.",
+      { detail, code, status }
     );
   }
   if (lower.includes("network") || lower.includes("fetch") || lower.includes("econn") || lower.includes("timeout")) {
-    throw new Error(`Sin conexión con Gemini: ${detail}`);
+    throw new GeminiError("No se pudo contactar a Gemini. Revisá tu conexión a internet y reintentá.", { detail });
   }
-  throw new Error(`Gemini rechazó la solicitud: ${detail}`);
+  throw new GeminiError("Gemini rechazó la solicitud. Probá grabar de nuevo la pregunta.", { detail, code, status });
 }
