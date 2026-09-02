@@ -43,6 +43,7 @@ import {
   GlobeIcon,
 } from "./components/icons";
 import { ensureAudio, sfx, setSfxMuted, SOUND_VOLUME, warmupOutput, setWarmupSinkId } from "./lib/sounds";
+import { cleanForTTS } from "./lib/tts";
 import {
   askGemini,
   blobToBase64,
@@ -449,13 +450,17 @@ export default function App() {
       userPausedRef.current = false;
       isCancelingRef.current = false;
 
+      // Limpiamos el markdown antes de trocear: el TTS lee literal
+      // los asteriscos/guiones de sintaxis y suena muy mal.
+      const cleaned = cleanForTTS(text);
+
       // Troceamos por oraciones (después de '.', '!', '?', o salto de
       // línea). Cada trozo es una utterance aparte, así el pause/resume
       // es robusto: cancelamos SOLO el trozo actual y al reanudar
       // empezamos el siguiente con un utterance nuevo (no dependemos
       // del synth.resume() que en Chrome Android suele dejar muda la
       // utterance).
-      const parts = text
+      const parts = cleaned
         .split(/(?<=[.!?\n])\s+/)
         .map((s) => s.trim())
         .filter(Boolean);
@@ -967,8 +972,8 @@ export default function App() {
 
       {/* ---------- Encabezado ---------- */}
       <header className="mx-auto flex max-w-6xl items-center justify-between gap-4 px-4 pb-4 pt-6 sm:px-6">
-        <h1 className="font-display text-2xl font-bold tracking-[0.18em] text-[#e9f4f1] sm:text-3xl">
-          ASIST. 90
+        <h1 className="font-display text-2xl font-bold tracking-[0.18em] text-[#c4b5fd] sm:text-3xl">
+          Asis. 91
         </h1>
         <div className="flex items-center gap-2">
           <span
