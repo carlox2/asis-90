@@ -1,24 +1,25 @@
 @import "tailwindcss";
 
 /* ============================================================
-   Asistente GEM · Hoja de estilos base
-   Paleta "laboratorio bioluminiscente": petróleo profundo con
-   coral (grabación), menta (voz), ámbar (pausa/proceso) y cian (envío).
+   asist. 90 · Biología del Comportamiento
+   Paleta "biodiversidad luminosa": follaje profundo con
+   verde claro como color principal, coral (grabación),
+   menta (voz), ámbar (pausa/proceso) y cian (envío).
    ============================================================ */
 
 :root {
-  --bg: #0d0a1f;
-  --panel: #14102b;
-  --panel-2: #1a1538;
-  --line: #2a2348;
-  --ink: #ece6ff;
-  --mut: #a597cf;
+  --bg: #0d1f12;
+  --panel: #112a18;
+  --panel-2: #163321;
+  --line: #234d33;
+  --ink: #ecfcef;
+  --mut: #a5d4b3;
   --coral: #ff6b5e;
   --mint: #3ddc97;
   --amber: #ffc24b;
   --cyan: #4cc9d4;
-  --accent: #c4b5fd;
-  --accent-2: #a78bfa;
+  --accent: #86efac;
+  --accent-2: #4ade80;
 }
 
 html,

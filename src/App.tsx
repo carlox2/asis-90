@@ -1,5 +1,5 @@
 /* ============================================================
-   ASISTENTE GEM · Biología del Comportamiento
+   ASIST. 90 · Biología del Comportamiento
    ------------------------------------------------------------
    Consola de estudio 100% frontend:
 
@@ -986,8 +986,8 @@ export default function App() {
 
       {/* ---------- Encabezado ---------- */}
       <header className="mx-auto flex max-w-6xl items-center justify-between gap-4 px-4 pb-4 pt-6 sm:px-6">
-        <h1 className="font-display text-2xl font-bold tracking-[0.18em] text-[#c4b5fd] sm:text-3xl">
-          Asis. 91
+        <h1 className="font-display text-2xl font-bold tracking-[0.18em] text-[#86efac] sm:text-3xl">
+          asist. 90
         </h1>
         <div className="flex items-center gap-2">
           <span
@@ -1411,7 +1411,7 @@ export default function App() {
           </div>
         </Reveal>
         <p className="mt-5 text-center font-mono-gem text-[10px] uppercase tracking-[0.2em] text-[#8fb0ac]/60">
-          Asistente GEM · herramienta personal de estudio
+          asist. 90 · Biología del Comportamiento (Cátedra Muzio, UBA)
         </p>
       </footer>
     </div>
